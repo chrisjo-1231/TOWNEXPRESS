@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  ADMIN
+  STORE_OWNER
+  STORE_STAFF
+  RIDER
+  CUSTOMER
+}
+
+enum StoreStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum StoreCategory {
+  GROCERY
+  RESTAURANT
+  PHARMACY
+  WATER_STATION
+  CONVENIENCE_STORE
+  BAKERY
+  OTHER
+}
+
+enum StaffStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY_FOR_PICKUP
+  ASSIGNED
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  COD
+  GCASH
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum RiderAvailability {
+  AVAILABLE
+  BUSY
+  OFFLINE
+}
+
+enum DeliveryRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  phone        String?  @unique
+  passwordHash String
+  role         UserRole @default(CUSTOMER)
+  isActive     Boolean  @default(true)
+  profileImage String?
+
+  ownedStores              Store[]           @relation("StoreOwner")
+  memberships              StoreMember[]
+  riderProfile             RiderProfile?
+  customerOrders           Order[]           @relation("CustomerOrders")
+  notifications            Notification[]
+  reviewedDeliveryRequests DeliveryRequest[] @relation("DeliveryRequestReviewer")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+// ============================================
+// STORE
+// ============================================
+
+model Store {
+  id              String        @id @default(cuid())
+  name            String
+  slug            String        @unique
+  description     String?
+  address         String
+  barangay        String?
+  phone           String?
+  logo            String?
+  category        StoreCategory @default(OTHER)
+  status          StoreStatus   @default(APPROVED)
+  rejectionReason String?
+  isActive        Boolean       @default(true)
+
+  ownerId String
+  owner   User   @relation("StoreOwner", fields: [ownerId], references: [id])
+
+  members  StoreMember[]
+  products Product[]
+  orders   Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+// ============================================
+// STORE MEMBER
+// ============================================
+
+model StoreMember {
+  id      String      @id @default(cuid())
+  userId  String
+  storeId String
+  title   String?
+  status  StaffStatus @default(ACTIVE)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, storeId])
+  @@index([storeId])
+}
+
+// ============================================
+// PRODUCT
+// ============================================
+
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  price       Decimal @db.Decimal(10, 2)
+  stock       Int     @default(0)
+  image       String?
+  isAvailable Boolean @default(true)
+
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id])
+
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([storeId])
+}
+
+// ============================================
+// RIDER PROFILE
+// ============================================
+
+model RiderProfile {
+  id           String            @id @default(cuid())
+  userId       String            @unique
+  vehicleType  String?
+  plateNumber  String?
+  availability RiderAvailability @default(OFFLINE)
+
+  user             User              @relation(fields: [userId], references: [id])
+  deliveries       Delivery[]
+  deliveryRequests DeliveryRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// DELIVERY ZONE
+// ============================================
+
+model DeliveryZone {
+  id          String  @id @default(cuid())
+  name        String
+  barangay    String
+  deliveryFee Decimal @db.Decimal(10, 2)
+  isActive    Boolean @default(true)
+
+  orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([barangay])
+}
+
+// ============================================
+// ORDER
+// ============================================
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  status          OrderStatus @default(PENDING)
+  subtotal        Decimal     @db.Decimal(10, 2)
+  deliveryFee     Decimal     @db.Decimal(10, 2)
+  totalAmount     Decimal     @db.Decimal(10, 2)
+  deliveryAddress String
+  notes           String?
+
+  customerId String
+  storeId    String
+  zoneId     String
+
+  customer         User              @relation("CustomerOrders", fields: [customerId], references: [id])
+  store            Store             @relation(fields: [storeId], references: [id])
+  zone             DeliveryZone      @relation(fields: [zoneId], references: [id])
+  deliveryRequests DeliveryRequest[]
+
+  items         OrderItem[]
+  delivery      Delivery?
+  payment       Payment?
+  statusHistory OrderStatusHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([storeId, status])
+  @@index([createdAt])
+}
+
+// ============================================
+// ORDER ITEM
+// ============================================
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  subtotal  Decimal @db.Decimal(10, 2)
+
+  orderId   String
+  productId String
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// ============================================
+// DELIVERY
+// ============================================
+
+model Delivery {
+  id          String    @id @default(cuid())
+  riderId     String?
+  orderId     String    @unique
+  pickupTime  DateTime?
+  deliveredAt DateTime?
+  proofImage  String?
+  notes       String?
+
+  rider RiderProfile? @relation(fields: [riderId], references: [id])
+  order Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([riderId])
+}
+
+// ============================================
+// DELIVERY REQUEST
+// ============================================
+// ============================================
+// DELIVERY REQUEST
+// ============================================
+
+model DeliveryRequest {
+  id     String                @id @default(cuid())
+  status DeliveryRequestStatus @default(PENDING)
+
+  riderMessage String?
+  adminNote    String?
+
+  orderId String
+  riderId String
+
+  reviewedById String?
+
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  rider      RiderProfile @relation(fields: [riderId], references: [id], onDelete: Cascade)
+  reviewedBy User?        @relation("DeliveryRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  requestedAt DateTime  @default(now())
+  reviewedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId, status])
+  @@index([riderId, status])
+  @@index([reviewedById])
+}
+
+// ============================================
+// PAYMENT
+// ============================================
+
+model Payment {
+  id        String        @id @default(cuid())
+  method    PaymentMethod
+  status    PaymentStatus @default(UNPAID)
+  amount    Decimal       @db.Decimal(10, 2)
+  reference String?
+
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================
+// ORDER STATUS HISTORY
+// ============================================
+
+model OrderStatusHistory {
+  id      String      @id @default(cuid())
+  status  OrderStatus
+  remarks String?
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// ============================================
+// NOTIFICATION
+// ============================================
+
+model Notification {
+  id      String  @id @default(cuid())
+  title   String
+  message String
+  isRead  Boolean @default(false)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
